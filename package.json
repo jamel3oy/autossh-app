@@ -1,0 +1,50 @@
+{
+  "name": "autossh-manager",
+  "version": "1.0.0",
+  "description": "Desktop GUI for managing AutoSSH tunnels",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:dev": "NODE_ENV=development electron .",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "pack": "electron-builder --dir"
+  },
+  "keywords": ["autossh", "ssh", "tunnel", "electron"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.autossh.manager",
+    "productName": "AutoSSH Manager",
+    "copyright": "Copyright © 2024",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "package.json",
+      "!node_modules/**",
+      "!dist/**"
+    ],
+    "mac": {
+      "target": [
+        { "target": "dmg",  "arch": ["universal"] },
+        { "target": "zip",  "arch": ["universal"] }
+      ],
+      "category": "public.app-category.developer-tools",
+      "darkModeSupport": true,
+      "icon": "assets/icon.icns"
+    },
+    "dmg": {
+      "title": "AutoSSH Manager ${version}",
+      "window": { "width": 540, "height": 400 }
+    }
+  }
+}
