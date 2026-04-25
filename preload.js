@@ -79,4 +79,20 @@ contextBridge.exposeInMainWorld('tunnelAPI', {
   /** Record which profile was used last */
   setLastUsed: (name) =>
     ipcRenderer.invoke('config:set-last', { name }),
+
+  // ── App / Tray Control ──────────────────────────────────────────────────────
+
+  /** Show (and focus) the main window */
+  showWindow: () => ipcRenderer.invoke('app:show-window'),
+
+  /** Gracefully quit the app (stop tunnel, destroy tray, exit) */
+  quit: () => ipcRenderer.invoke('app:quit'),
+
+  /**
+   * Register a callback for the tray "Start Tunnel" request.
+   * Fired when the user clicks "Start Tunnel" from the tray context menu.
+   */
+  onTrayStartRequested: (callback) => {
+    ipcRenderer.on('tray:start-requested', (_event) => callback());
+  },
 });

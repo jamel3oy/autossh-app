@@ -10,13 +10,14 @@
  *  - Persist tunnel profiles via ConfigManager
  */
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
-const ConfigManager = require('./src/configManager');
+const ConfigManager  = require('./src/configManager');
+const { makeTrayPNG } = require('./src/trayIcon');
 
 // ─── Globals ──────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,143 @@ let autosshProcess = null;
 
 /** @type {ConfigManager} */
 let configManager;
+
+/** @type {import('electron').Tray|null} */
+let tray = null;
+
+// ─── Tray Images (built once, cached) ─────────────────────────────────────────
+
+let _trayImages = null;
+function getTrayImages() {
+  if (!_trayImages) {
+    // 36×36 buffer → rendered at 18 pt on Retina (scaleFactor 2.0)
+    const stoppedImg = nativeImage.createFromBuffer(makeTrayPNG(false, 36), { scaleFactor: 2.0 });
+    // Template image: macOS auto-tints for light/dark menu bar & highlights on click
+    stoppedImg.setTemplateImage(true);
+    const runningImg = nativeImage.createFromBuffer(makeTrayPNG(true, 36), { scaleFactor: 2.0 });
+    // Do NOT mark running as template — we want the green colour to show
+    _trayImages = { stopped: stoppedImg, running: runningImg };
+  }
+  return _trayImages;
+}
+
+// ─── Tray Menu ─────────────────────────────────────────────────────────────────
+
+/**
+ * Rebuild and cache the context menu, then update the icon.
+ * Called whenever tunnel state or window visibility changes.
+ * @param {boolean} running
+ */
+function updateTray(running) {
+  if (!tray || tray.isDestroyed()) return;
+
+  const imgs = getTrayImages();
+  tray.setImage(running ? imgs.running : imgs.stopped);
+  tray.setToolTip(`AutoSSH Manager — ${running ? '● Tunnel Running' : '○ Stopped'}`);
+
+  const windowVisible = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible();
+
+  // Build menu without calling setContextMenu — that API intercepts left-clicks
+  // on macOS which causes the icon to "bounce" on every click.
+  // We pop the menu manually on right-click instead (see setupTray).
+  const menu = Menu.buildFromTemplate([
+    {
+      label: 'AutoSSH Manager',
+      enabled: false,
+    },
+    { type: 'separator' },
+    {
+      label: running ? '● Tunnel: Running' : '○ Tunnel: Stopped',
+      enabled: false,
+    },
+    { type: 'separator' },
+    {
+      label: windowVisible ? 'Hide Window' : 'Show Window',
+      click: () => toggleWindow(),
+    },
+    { type: 'separator' },
+    {
+      label: 'Start Tunnel',
+      enabled: !running,
+      click: () => {
+        showWindow();
+        // Signal renderer to initiate start (renderer has the form values)
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('tray:start-requested');
+        }
+      },
+    },
+    {
+      label: 'Stop Tunnel',
+      enabled: running,
+      click: () => {
+        stopAutossh();
+        sendLog('info', 'Tunnel stopped from tray menu.');
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => quitApp(),
+    },
+  ]);
+
+  // Store on the tray instance for the right-click handler
+  tray._menu = menu;
+}
+
+/** Create the system tray — called once at startup */
+function setupTray() {
+  const imgs = getTrayImages();
+  tray = new Tray(imgs.stopped);
+  updateTray(false);
+
+  // Left-click: toggle window
+  tray.on('click', () => toggleWindow());
+
+  // Right-click: show context menu (avoids the macOS left-click bounce bug
+  // that occurs when setContextMenu() is used)
+  tray.on('right-click', () => {
+    if (tray._menu) tray.popUpContextMenu(tray._menu);
+  });
+}
+
+// ─── Window Helpers ────────────────────────────────────────────────────────────
+
+/** Bring the window to front; recreate it if it was destroyed */
+function showWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  mainWindow.show();
+  mainWindow.focus();
+  if (app.dock) app.dock.show();
+}
+
+/** Toggle the main window between visible and hidden */
+function toggleWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    showWindow();
+  } else if (mainWindow.isVisible()) {
+    mainWindow.hide();
+    if (app.dock) app.dock.hide();
+  } else {
+    showWindow();
+  }
+  // Rebuild menu so Show/Hide label reflects new state
+  updateTray(autosshProcess !== null);
+}
+
+/** Graceful quit: stop tunnel, destroy tray, exit */
+function quitApp() {
+  stopAutossh(true);
+  if (tray && !tray.isDestroyed()) {
+    tray.destroy();
+    tray = null;
+  }
+  app.exit(0);
+}
 
 // ─── SSH_ASKPASS Helpers ──────────────────────────────────────────────────────
 
@@ -88,10 +226,22 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
   // Show once content is painted to avoid unstyled flash
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+    if (app.dock) app.dock.show();
+  });
+
+  // On macOS: hide to tray instead of quitting when the red ✕ is clicked
+  mainWindow.on('close', (event) => {
+    if (process.platform === 'darwin') {
+      event.preventDefault();
+      mainWindow.hide();
+      if (app.dock) app.dock.hide();
+      updateTray(autosshProcess !== null);
+    }
+  });
 
   mainWindow.on('closed', () => {
-    stopAutossh(true);
     mainWindow = null;
   });
 
@@ -242,6 +392,8 @@ function sendLog(type, message) {
 function sendStatus(running) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send('tunnel:status', { running });
+  // Keep tray in sync whenever status changes
+  updateTray(running);
 }
 
 // ─── IPC Handlers ─────────────────────────────────────────────────────────────
@@ -321,23 +473,27 @@ ipcMain.handle('config:set-last', async (_event, { name }) => {
 
 // ─── App Lifecycle ─────────────────────────────────────────────────────────────
 
+// ─── IPC — Window / App Control (from renderer) ──────────────────────────────
+
+ipcMain.handle('app:show-window', () => { showWindow(); return { success: true }; });
+ipcMain.handle('app:quit',        () => { quitApp();    });
+
+// ─── App Lifecycle ─────────────────────────────────────────────────────────────
+
 app.whenReady().then(() => {
-  // Store config in the OS-appropriate userData directory
   const configPath = path.join(app.getPath('userData'), 'autossh-manager-config.json');
   configManager = new ConfigManager(configPath);
   createWindow();
+  setupTray();
 });
 
+// Never quit when all windows close — keep running in the tray
 app.on('window-all-closed', () => {
-  // On macOS, apps conventionally stay open until the user quits explicitly
-  if (process.platform !== 'darwin') app.quit();
+  if (process.platform !== 'darwin') quitApp();
 });
 
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
-});
+// macOS Dock click: show window
+app.on('activate', () => showWindow());
 
-// Ensure autossh is killed when the app quits (e.g. Cmd+Q)
-app.on('before-quit', () => {
-  stopAutossh(true);
-});
+// Ensure tunnel is killed on Cmd+Q / app.quit()
+app.on('before-quit', () => stopAutossh(true));

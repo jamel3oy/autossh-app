@@ -76,7 +76,7 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Pad both sides equally; left side makes room for macOS traffic lights */
+  /* Pad left side for macOS traffic lights; right side for tray buttons */
   padding: 0 78px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
@@ -84,6 +84,7 @@ html, body {
   /* Allow the entire bar to be dragged as a window move handle */
   -webkit-app-region: drag;
   user-select: none;
+  position: relative;
 }
 
 .titlebar-title {
@@ -91,6 +92,47 @@ html, body {
   font-weight: 600;
   color: var(--text-muted);
   letter-spacing: 0.03em;
+}
+
+/* Tray action buttons in the titlebar (right side) */
+.titlebar-actions {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 6px;
+  /* Buttons must NOT be draggable — exclude them from the drag region */
+  -webkit-app-region: no-drag;
+}
+
+.btn-tray {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 9px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  line-height: 1.4;
+}
+
+.btn-tray:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.btn-tray-quit {
+  border-color: rgba(248, 81, 73, 0.4);
+  color: #f85149;
+}
+
+.btn-tray-quit:hover {
+  background: rgba(248, 81, 73, 0.15);
+  color: #ff6b6b;
+  border-color: #f85149;
 }
 
 /* ── Two-pane Layout ───────────────────────────────────────────────────────── */

@@ -23,6 +23,8 @@ const btnNewProfile      = document.getElementById('btnNewProfile');
 const btnSaveProfile     = document.getElementById('btnSaveProfile');
 const btnDeleteProfile   = document.getElementById('btnDeleteProfile');
 const btnClearLog        = document.getElementById('btnClearLog');
+const btnHideToTray      = document.getElementById('btnHideToTray');
+const btnQuit            = document.getElementById('btnQuit');
 
 const profileListEl      = document.getElementById('profileList');
 const statusDot          = document.getElementById('statusDot');
@@ -337,6 +339,28 @@ function addLog({ type, message, timestamp }) {
 
 btnClearLog.addEventListener('click', () => {
   logOutput.innerHTML = '<div class="log-placeholder">Log cleared.</div>';
+});
+
+// ─── Tray / App Control ───────────────────────────────────────────────────────
+
+if (btnHideToTray) {
+  btnHideToTray.addEventListener('click', () => {
+    // Hide the window; the app keeps running in the background via the tray icon
+    window.close();
+  });
+}
+
+if (btnQuit) {
+  btnQuit.addEventListener('click', async () => {
+    await window.tunnelAPI.quit();
+  });
+}
+
+// When user clicks "Start Tunnel" from the tray context menu
+window.tunnelAPI.onTrayStartRequested(() => {
+  if (!isRunning) {
+    btnStart.click();
+  }
 });
 
 // ─── Status & Auto-reconnect ──────────────────────────────────────────────────
